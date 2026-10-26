@@ -1,11 +1,11 @@
-# 🎃 Cukorvadászat
+# 🎃 Kenderesi Halloween Cukorvadászat
 
 Mobilbarát webapp Halloweenre: bárki felvehet helyeket (ahol cukrot lehet gyűjteni) a térképre, mindenki látja őket, és egy kattintással útvonalat tervezhet a Google Térképen.
 
 ## Funkciók
 
 - Sötét, Halloween hangulatú térkép (Leaflet + OpenStreetMap csempék CSS-szűrővel sötétítve – nem kell API kulcs)
-- **Új hely**: térkép húzásával (📍 a közepén), saját helyzetből, **címkereséssel** (a hely nevénél gépelve címjavaslatok jönnek), vagy beillesztett koordinátával / Google Térkép linkkel (a mobilos rövid `maps.app.goo.gl/…` linkek is működnek – a szerver oldja fel)
+- **Új hely**: térkép húzásával (📍 a közepén), saját helyzetből, **címkereséssel** (a hely nevénél gépelve Google címjavaslatok jönnek), vagy beillesztett koordinátával / Google Térkép linkkel (a mobilos rövid `maps.app.goo.gl/…` linkek is működnek – a szerver oldja fel)
 - Minden helyhez: név, megjegyzés, „Elfogyott a cukor 💀 / Mégis van még 🍬” jelölés
 - „Útvonal a Google Térképen” és „Megnyitás Google Térképen” gomb minden helynél
 - Lista a legközelebbi helyekkel (ha engedélyezed a helymeghatározást)
@@ -41,7 +41,7 @@ Az `ADMIN_TOKEN` értékét a Render dashboardon találod (Environment). Egyszer
 https://a-te-címed.onrender.com/?admin=TOKEN
 ```
 
-Ezután a böngésző megjegyzi a kulcsot (a címsorból el is tűnik), a fejlécben megjelenik a 🔑 Admin jelvény, látszik az „➕ Új hely” gomb, és minden helynél van „🗑️ Hely törlése”. A jelvényre koppintva kiléphetsz az admin módból az adott eszközön.
+Ezután a böngésző megjegyzi a kulcsot (a címsorból el is tűnik), a fejlécben megjelenik a 🔑 Admin jelvény, látszik az „➕ Új hely” gomb, és minden helynél van „✏️ Hely szerkesztése” (név, megjegyzés, pozíció módosítása) és „🗑️ Hely törlése”. A jelvényre koppintva kiléphetsz az admin módból az adott eszközön.
 
 Ha az „elfogyott / van még” jelölést is csak te szeretnéd végezni, állítsd be a Renderen az environment változót: `PUBLIC_STATUS=false`.
 
@@ -54,5 +54,6 @@ A Helymeghatározáshoz HTTPS kell – a Render ezt automatikusan adja. iPhone-o
 ## Link feloldás és címkeresés
 
 - `GET /api/resolve?url=…` – Google Térkép link (rövid is) → koordináta. A szerver csak Google-os hosztokat követ (SSRF ellen), a EU-s „cookie hozzájárulás” átirányítást is kezeli.
-- `GET /api/geocode?q=…` – címjavaslatok a [Photon](https://photon.komoot.io) (OpenStreetMap) szolgáltatással, hiba esetén Nominatim tartalékkal. API kulcs nem kell.
+- `GET /api/geocode?q=…` – címjavaslatok a Google Places API (New) Text Search szolgáltatásával. Kell hozzá a `GOOGLE_MAPS_API_KEY` környezeti változó (Google Cloud Console → *Places API (New)* engedélyezése, a kulcsot érdemes erre az egy API-ra korlátozni). Kulcs nélkül, vagy Google hiba esetén a régi Photon/Nominatim (OpenStreetMap) a tartalék.
+- `PUT /api/spots/:id` – meglévő hely módosítása (csak admin).
 - Mindkettő csak adminnak érhető el, hogy ne lehessen nyílt proxyként használni.

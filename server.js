@@ -15,6 +15,7 @@ const maps = (() => {
 const UA_BROWSER =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const UA_APP = 'cukorvadaszat/1.0 (Halloween cukorvadaszat webapp)';
+const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 
 // Csak Google-os hosztokat követünk (SSRF ellen)
 const GOOGLE_HOST =
@@ -254,6 +255,39 @@ function placeMatches(linkName, props) {
   }));
 }
 
+/* Google Places (New) – Text Search: pontos házszámokkal, magyar nyelven.
+ * Kell hozzá a GOOGLE_MAPS_API_KEY környezeti változó (Places API (New) engedélyezve). */
+function googleItem(p) {
+  const loc = p && p.location;
+  if (!loc || !Number.isFinite(loc.latitude) || !Number.isFinite(loc.longitude)) return null;
+  const addr = String(p.formattedAddress || '').replace(/,?\s*(?:Magyarország|Hungary)\s*$/i, '').trim();
+  const name = (p.displayName && p.displayName.text) || '';
+  const parts = addr.split(',').map((x) => x.trim()).filter(Boolean);
+  const title = name || (parts.length > 1 ? parts[1] : parts[0]) || '';
+  if (!title) return null;
+  return { title, sub: addr && addr !== title ? addr : '', lat: loc.latitude, lng: loc.longitude };
+}
+
+async function googleSearch(q, lat, lng, doFetch) {
+  const body = { textQuery: q, languageCode: 'hu', regionCode: 'HU' };
+  if (lat !== null && lng !== null) {
+    body.locationBias = { circle: { center: { latitude: lat, longitude: lng }, radius: 30000 } };
+  }
+  const r = await doFetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_KEY,
+      'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!r.ok) throw new Error('google ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const j = await r.json();
+  return (j.places || []).map(googleItem).filter(Boolean);
+}
+
 const cache = new Map();
 const CACHE_MAX = 500;
 const CACHE_TTL = 10 * 60 * 1000;
@@ -271,8 +305,20 @@ async function geocode(q, bias, fetchImpl) {
 
   const headers = { 'User-Agent': UA_APP, Accept: 'application/json' };
   let items = [];
+  let googleOk = false;
 
-  try {
+  if (GOOGLE_KEY) {
+    try {
+      items = await googleSearch(q, lat, lng, doFetch);
+      googleOk = true;
+    } catch (e) {
+      console.error('[geocode] Google hiba, OSM tartalék:', e && e.message);
+      items = [];
+    }
+  }
+
+  // Tartalék (OSM) csak akkor, ha nincs Google kulcs, vagy a Google hibázott
+  if (!googleOk) try {
     let u = 'https://photon.komoot.io/api/?limit=7&q=' + encodeURIComponent(q);
     if (lat !== null && lng !== null) u += '&lat=' + lat + '&lon=' + lng;
     const r = await doFetch(u, { headers, signal: AbortSignal.timeout(5000) });
@@ -283,7 +329,7 @@ async function geocode(q, bias, fetchImpl) {
     items = [];
   }
 
-  if (!items.length) {
+  if (!googleOk && !items.length) {
     try {
       let u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=7&accept-language=hu&q=' + encodeURIComponent(q);
       if (lat !== null && lng !== null) {
@@ -352,6 +398,13 @@ function createFileStore() {
       save();
       return s;
     },
+    async update(id, { name, note, lat, lng }) {
+      const s = spots.find((x) => x.id === id);
+      if (!s) return null;
+      Object.assign(s, { name, note, lat, lng });
+      save();
+      return s;
+    },
     async setStatus(id, status) {
       const s = spots.find((x) => x.id === id);
       if (!s) return null;
@@ -410,6 +463,13 @@ function createPgStore(url) {
       );
       return toSpot(r.rows[0]);
     },
+    async update(id, { name, note, lat, lng }) {
+      const r = await pool.query(
+        'UPDATE spots SET name = $2, note = $3, lat = $4, lng = $5 WHERE id = $1 RETURNING *',
+        [id, name, note, lat, lng]
+      );
+      return r.rows[0] ? toSpot(r.rows[0]) : null;
+    },
     async setStatus(id, status) {
       const r = await pool.query('UPDATE spots SET status = $2 WHERE id = $1 RETURNING *', [id, status]);
       return r.rows[0] ? toSpot(r.rows[0]) : null;
@@ -441,6 +501,10 @@ function isAdmin(req) {
 function requireAdmin(req, res, next) {
   if (!isAdmin(req)) return res.status(403).json({ error: 'Új helyet csak az admin vehet fel.' });
   next();
+}
+
+if (!process.env.GOOGLE_MAPS_API_KEY) {
+  console.warn('[figyelem] Nincs GOOGLE_MAPS_API_KEY – a címkeresés a pontatlanabb OpenStreetMap-re esik vissza.');
 }
 
 if (!ADMIN_TOKEN) {
@@ -510,6 +574,32 @@ app.post('/api/spots', requireAdmin, wrap(async (req, res) => {
     lng: Math.round(lng * 1e6) / 1e6,
   });
   res.status(201).json(spot);
+}));
+
+// Már felvett hely módosítása (név, megjegyzés, pozíció) – csak admin
+app.put('/api/spots/:id', wrap(async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Nincs jogosultság.' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Hibás azonosító.' });
+
+  const name = cleanText(req.body && req.body.name, 60);
+  const note = cleanText(req.body && req.body.note, 200);
+  const lat = Number(req.body && req.body.lat);
+  const lng = Number(req.body && req.body.lng);
+
+  if (!name) return res.status(400).json({ error: 'Adj nevet a helynek!' });
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return res.status(400).json({ error: 'Érvénytelen koordináta.' });
+  }
+
+  const spot = await store.update(id, {
+    name,
+    note,
+    lat: Math.round(lat * 1e6) / 1e6,
+    lng: Math.round(lng * 1e6) / 1e6,
+  });
+  if (!spot) return res.status(404).json({ error: 'Nincs ilyen hely.' });
+  res.json(spot);
 }));
 
 app.post('/api/spots/:id/status', wrap(async (req, res) => {

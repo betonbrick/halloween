@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1b0f33">
-<title>Cukorvadászat 🎃</title>
+<title>Kenderesi Halloween Cukorvadászat 🎃</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Creepster&display=swap" rel="stylesheet">
@@ -40,9 +40,9 @@
   }
   h1 {
     margin: 0; font-family: "Creepster", cursive; font-weight: 400;
-    font-size: 30px; letter-spacing: 1px; color: var(--orange);
+    font-size: 24px; letter-spacing: 1px; color: var(--orange);
     text-shadow: 0 0 14px rgba(255, 122, 24, .45);
-    line-height: 1;
+    line-height: 1.05; min-width: 0;
   }
   #count {
     font-size: 14px; font-weight: 700; color: var(--green);
@@ -58,7 +58,7 @@
   }
 
   @media (max-width: 400px) {
-    h1 { font-size: 24px; }
+    h1 { font-size: 20px; }
     #count { padding: 5px 9px; font-size: 13px; }
     .admin-badge { padding: 5px 8px; font-size: 12px; }
     header { padding-left: 12px; padding-right: 12px; }
@@ -101,8 +101,8 @@
   .btn:active { transform: scale(.97); }
   .btn:disabled { opacity: .6; }
   .btn.primary { background: linear-gradient(180deg, var(--orange2), var(--orange)); color: #2a1200; }
-  #bar .primary { flex: 2; }
-  #bar .btn:not(.primary) { flex: 1; }
+  #bar .btn { flex: 1 1 auto; white-space: nowrap; padding: 0 12px; }
+  @media (max-width: 400px) { #bar { gap: 8px; } #bar .btn { font-size: 15px; padding: 0 8px; } }
 
   .field { display: block; margin-bottom: 10px; }
   .field > span { display: block; font-size: 12px; color: var(--muted); margin: 0 2px 4px; text-transform: uppercase; letter-spacing: .5px; }
@@ -200,7 +200,7 @@
 </head>
 <body>
   <header>
-    <h1>🎃 Cukorvadászat</h1>
+    <h1>Kenderesi Halloween Cukorvadászat 🎃</h1>
     <div class="hright">
       <button id="adminBadge" class="admin-badge" style="display:none" title="Admin mód – koppints a kilépéshez">🔑 Admin</button>
       <div id="count">… hely</div>
@@ -215,12 +215,12 @@
   <div class="bottom">
     <div id="bar">
       <button class="btn primary" id="btnAdd">➕ Új hely</button>
-      <button class="btn" id="btnLocate" aria-label="Hol vagyok?">📍 Én</button>
+      <button class="btn" id="btnLocate" aria-label="Hol vagyok?">📍 Hol vagyok?</button>
       <button class="btn" id="btnList">📋 Lista</button>
     </div>
 
     <div id="addpanel">
-      <p class="tip hide-on-sug">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
+      <p class="tip hide-on-sug" id="addTip">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
       <div class="ac">
         <label class="field"><span>Hely neve / címe</span>
           <input type="text" id="name" maxlength="60" placeholder="Kezdj el írni egy címet, pl. Kossuth u. 12" autocomplete="off" autocorrect="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest">
@@ -346,6 +346,7 @@
       href: 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng,
       text: '🗺️ Megnyitás Google Térképen'
     }));
+    if (isAdmin) actions.append(el('button', { class: 'btn', text: '✏️ Hely szerkesztése', onclick: function () { startEdit(s); } }));
     if (isAdmin) actions.append(el('button', { class: 'btn danger', text: '🗑️ Hely törlése', onclick: function () { removeSpot(s); } }));
     box.append(actions);
     return box;
@@ -495,6 +496,32 @@
   }
   map.on('move', syncCoords);
 
+  /* A 📍 azonnal a kiválasztott helyre kerül: a térkép méretváltozásai (billentyűzet, lista bezárása)
+     közben többször újra középre igazítunk, amíg a felhasználó el nem húzza a térképet. */
+  var settleTimers = [], programmatic = false;
+  function cancelSettle() { settleTimers.forEach(clearTimeout); settleTimers = []; }
+  map.on('dragstart', cancelSettle);
+  map.on('zoomstart', function () { if (!programmatic) cancelSettle(); });
+
+  function placePin(lat, lng) {
+    cancelSettle();
+    var target = L.latLng(lat, lng);
+    function go(last) {
+      programmatic = true;
+      try {
+        map.invalidateSize({ animate: false, pan: false });
+        map.setView(target, Math.max(map.getZoom(), 17), { animate: false });
+      } finally { programmatic = false; }
+      if (last && document.activeElement !== coordsInput) {
+        coordsInput.value = target.lat.toFixed(5) + ', ' + target.lng.toFixed(5);
+      }
+    }
+    go(false);
+    [60, 150, 350, 700, 1100].forEach(function (ms, i, arr) {
+      settleTimers.push(setTimeout(function () { go(i === arr.length - 1); }, ms));
+    });
+  }
+
   function hasLink(t) { return /https?:\/\/[^\s\/]+\.[a-z]{2,}/i.test(t); }
 
   /* Rövid mobilos linkek (maps.app.goo.gl/…) feloldása a szerveren keresztül */
@@ -515,7 +542,7 @@
       }
       coordsInput.value = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
       setHint('');
-      map.setView([r.lat, r.lng], Math.max(map.getZoom(), 17), { animate: false });
+      placePin(r.lat, r.lng);
       if (r.name && !$('#name').value.trim()) $('#name').value = r.name.slice(0, 60);
       toast('Link feloldva ✔');
       return { lat: r.lat, lng: r.lng };
@@ -587,8 +614,8 @@
     hideSug();
     coordsInput.value = it.lat.toFixed(5) + ', ' + it.lng.toFixed(5);
     setHint('');
-    map.setView([it.lat, it.lng], Math.max(map.getZoom(), 17), { animate: false });
     nameInput.blur(); // mobilon becsukja a billentyűzetet, így látszik a térkép
+    placePin(it.lat, it.lng);
   }
 
   nameInput.addEventListener('input', function () {
@@ -619,8 +646,32 @@
     }
     setTimeout(function () { map.invalidateSize(); syncCoords(); }, 50);
   }
+  var ADD_TIP = $('#addTip').textContent;
+  var EDIT_TIP = '✏️ Hely szerkesztése: írd át a nevet / megjegyzést, vagy told a térképet / keress új címet – a 📍 jelöli az új pozíciót.';
+  var editingId = null;
+
+  function startEdit(s) {
+    closeSheet();
+    map.closePopup();
+    editingId = s.id;
+    $('#name').value = s.name;
+    $('#note').value = s.note || '';
+    coordsInput.value = s.lat.toFixed(5) + ', ' + s.lng.toFixed(5);
+    $('#addTip').textContent = EDIT_TIP;
+    hideSug(); setHint('');
+    document.body.classList.add('adding');
+    placePin(s.lat, s.lng);
+  }
+
   function cancelAdd() {
     document.body.classList.remove('adding');
+    cancelSettle();
+    if (editingId !== null) {
+      editingId = null;
+      $('#name').value = '';
+      $('#note').value = '';
+      $('#addTip').textContent = ADD_TIP;
+    }
     resolveSeq++; hideSug(); setHint('');
     setTimeout(function () { map.invalidateSize(); }, 50);
   }
@@ -637,15 +688,20 @@
     if (!c) { toast('A koordináta nem érvényes'); coordsInput.focus(); return; }
     var btn = $('#btnSave');
     btn.disabled = true;
-    api('/api/spots', { method: 'POST', body: JSON.stringify({ name: name, note: $('#note').value, lat: c.lat, lng: c.lng }) })
+    var editId = editingId;
+    var payload = JSON.stringify({ name: name, note: $('#note').value, lat: c.lat, lng: c.lng });
+    (editId !== null
+      ? api('/api/spots/' + editId, { method: 'PUT', body: payload })
+      : api('/api/spots', { method: 'POST', body: payload }))
       .then(function (s) {
-        spots.push(s);
+        if (editId !== null) spots = spots.map(function (x) { return x.id === s.id ? s : x; });
+        else spots.push(s);
         render();
         cancelAdd();
         $('#name').value = '';
         $('#note').value = '';
         focusSpot(s.id);
-        toast('Mentve! 🎃');
+        toast(editId !== null ? 'Módosítva ✔' : 'Mentve! 🎃');
       })
       .catch(function (e) { toast(e.message); })
       .then(function () { btn.disabled = false; });
