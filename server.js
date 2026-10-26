@@ -259,13 +259,46 @@ function placeMatches(linkName, props) {
  * Kell hozzá a GOOGLE_MAPS_API_KEY környezeti változó (Places API (New) engedélyezve). */
 function googleItem(p) {
   const loc = p && p.location;
-  if (!loc || !Number.isFinite(loc.latitude) || !Number.isFinite(loc.longitude)) return null;
-  const addr = String(p.formattedAddress || '').replace(/,?\s*(?:Magyarország|Hungary)\s*$/i, '').trim();
-  const name = (p.displayName && p.displayName.text) || '';
-  const parts = addr.split(',').map((x) => x.trim()).filter(Boolean);
-  const title = name || (parts.length > 1 ? parts[1] : parts[0]) || '';
+
+  if (!loc ||
+      !Number.isFinite(loc.latitude) ||
+      !Number.isFinite(loc.longitude)) {
+    return null;
+  }
+
+  // Angolos közterületnevek javítása
+  function magyarCim(text) {
+    return String(text || '')
+      .replace(/\bWay(?=\s+\d|,|$)/gi, 'út')
+      .replace(/\bStreet(?=\s+\d|,|$)/gi, 'utca')
+      .replace(/\bRoad(?=\s+\d|,|$)/gi, 'út');
+  }
+
+  const addr = magyarCim(
+    String(p.formattedAddress || '')
+      .replace(/,?\s*(?:Magyarország|Hungary)\s*$/i, '')
+      .trim()
+  );
+
+  const name = magyarCim(
+    (p.displayName && p.displayName.text) || ''
+  );
+
+  const parts = addr.split(',')
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  const title = name ||
+    (parts.length > 1 ? parts[1] : parts[0]) || '';
+
   if (!title) return null;
-  return { title, sub: addr && addr !== title ? addr : '', lat: loc.latitude, lng: loc.longitude };
+
+  return {
+    title,
+    sub: addr && addr !== title ? addr : '',
+    lat: loc.latitude,
+    lng: loc.longitude
+  };
 }
 
 async function googleSearch(q, lat, lng, doFetch) {
