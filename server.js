@@ -154,21 +154,29 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
+// Az index.html-t a public/ mappában keressük; ha oda nem került be
+// (pl. rosszul töltötték fel GitHubra), a server.js melletti példányt használjuk.
+const INDEX_CANDIDATES = [
+  path.join(PUBLIC_DIR, 'index.html'),
+  path.join(__dirname, 'index.html'),
+];
+const findIndex = () => INDEX_CANDIDATES.find((f) => fs.existsSync(f));
+
 console.log('[start] server.js helye:', __dirname);
-console.log('[start] keresett index.html:', INDEX_FILE, '->', fs.existsSync(INDEX_FILE) ? 'MEGVAN' : 'HIÁNYZIK');
+console.log('[start] index.html:', findIndex() || 'HIÁNYZIK');
 try { console.log('[start] mappa tartalma:', fs.readdirSync(__dirname).join(', ')); } catch (_) {}
 
 app.use(express.static(PUBLIC_DIR, { maxAge: '5m' }));
 
 app.get('/', (_req, res) => {
-  if (!fs.existsSync(INDEX_FILE)) {
+  const file = findIndex();
+  if (!file) {
     return res.status(500).type('text').send(
-      'Hiányzik a public/index.html.\nKeresett hely: ' + INDEX_FILE +
-      '\nA server.js mappájában: ' + fs.readdirSync(__dirname).join(', ')
+      'Hiányzik az index.html (sem public/, sem a server.js mellett).\n' +
+      'A server.js mappájában: ' + fs.readdirSync(__dirname).join(', ')
     );
   }
-  res.sendFile(INDEX_FILE);
+  res.sendFile(file);
 });
 
 app.get('/healthz', (_req, res) => res.send('ok'));
