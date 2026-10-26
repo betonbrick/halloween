@@ -4,6 +4,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const maps = require('./lib/maps');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
@@ -219,6 +220,36 @@ app.delete('/api/spots/:id', wrap(async (req, res) => {
   const ok = await store.remove(id);
   if (!ok) return res.status(404).json({ error: 'Nincs ilyen hely.' });
   res.json({ ok: true });
+}));
+
+// Google Térkép link (akár rövid: maps.app.goo.gl/…) → koordináta
+app.get('/api/resolve', requireAdmin, wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const input = String(req.query.url || '').slice(0, 2000);
+  try {
+    return res.json(await maps.resolveMapsUrl(input));
+  } catch (e) {
+    // Ha van név, de koordináta nincs a linkben, megpróbáljuk név alapján megkeresni
+    if (e.name_) {
+      const found = await maps.geocode(e.name_, null);
+      if (found.length) return res.json({ lat: found[0].lat, lng: found[0].lng, name: e.name_ });
+    }
+    const status = e.status || 502;
+    const msg = status === 400 || status === 422
+      ? e.message
+      : 'Nem sikerült feloldani a linket. Nyisd meg a Google Térképen, és illeszd be a címsorból a hosszú linket, vagy a koordinátát.';
+    if (!e.status) console.error('[resolve]', e && e.message);
+    return res.status(status === 422 ? 422 : status === 400 ? 400 : 502).json({ error: msg });
+  }
+}));
+
+// Címjavaslatok a hely nevéhez
+app.get('/api/geocode', requireAdmin, wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+  const bias = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  res.json(await maps.geocode(String(req.query.q || ''), bias));
 }));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Nem található.' }));

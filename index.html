@@ -64,13 +64,15 @@
     header { padding-left: 12px; padding-right: 12px; }
   }
 
-  #mapwrap { position: relative; flex: 1; min-height: 0; }
-  #map { position: absolute; inset: 0; background: #0e0819; }
+  /* A térkép saját rétegkontextusba kerül: a Leaflet (z-index 400–1000) és a 📍 célkereszt
+     így csak a térképen belül rétegeződik, a lista / űrlap / értesítés mindig fölötte marad. */
+  #mapwrap { position: relative; z-index: 0; isolation: isolate; flex: 1; min-height: 0; overflow: hidden; }
+  #map { position: absolute; inset: 0; z-index: 0; isolation: isolate; background: #0e0819; }
   /* sötét, lilás Halloween-hangulat a sima OSM csempékből (API kulcs nélkül) */
   #map .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(.85) contrast(.95) saturate(.7); }
 
   #crosshair {
-    position: absolute; left: 50%; top: 50%; z-index: 500; pointer-events: none;
+    position: absolute; left: 50%; top: 50%; z-index: 1; pointer-events: none;
     transform: translate(-50%, -100%); font-size: 44px; line-height: 1;
     filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .6));
     display: none;
@@ -80,9 +82,9 @@
     transform: translateX(-50%); border-radius: 50%; background: var(--orange);
     box-shadow: 0 0 0 4px rgba(255, 122, 24, .3);
   }
-  body.adding #crosshair { display: block; }
+  body.adding:not(.sheet-open) #crosshair { display: block; }
 
-  .bottom { flex: none; background: var(--panel); border-top: 2px solid var(--orange);
+  .bottom { position: relative; z-index: 1000; flex: none; background: var(--panel); border-top: 2px solid var(--orange);
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
 
   #bar { display: flex; gap: 10px; }
@@ -111,6 +113,23 @@
   textarea { resize: none; height: 56px; }
   input:focus, textarea:focus { outline: 2px solid var(--orange); border-color: transparent; }
   #coordHint { display: none; color: var(--danger); font-size: 13px; margin: -4px 2px 8px; }
+  #coordHint.info { color: var(--muted); }
+
+  /* címjavaslatok (a panel a képernyő alján van, ezért felfelé nyílik) */
+  .ac { position: relative; }
+  .suggest {
+    position: absolute; left: 0; right: 0; bottom: calc(100% - 6px); z-index: 10;
+    list-style: none; margin: 0; padding: 4px; max-height: 38vh; max-height: 38dvh; overflow-y: auto;
+    background: var(--panel2); border: 1px solid var(--orange); border-radius: 14px;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, .55); display: none;
+  }
+  .suggest.show { display: block; }
+  .suggest li { display: flex; flex-direction: column; gap: 1px; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+  .suggest li + li { border-top: 1px solid rgba(255, 255, 255, .06); }
+  .suggest li:active, .suggest li.hl { background: rgba(255, 122, 24, .22); }
+  .suggest strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggest span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggest li.status { cursor: default; color: var(--muted); font-size: 13px; flex-direction: row; }
   .row { display: flex; gap: 10px; }
   .row .btn { flex: 1; }
   .row .btn.primary { flex: 2; }
@@ -199,16 +218,19 @@
 
     <div id="addpanel">
       <p class="tip">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
-      <label class="field"><span>Hely neve</span>
-        <input type="text" id="name" maxlength="60" placeholder="pl. Kossuth u. 12 – nagy kosár" autocomplete="off">
-      </label>
+      <div class="ac">
+        <label class="field"><span>Hely neve / címe</span>
+          <input type="text" id="name" maxlength="60" placeholder="Kezdj el írni egy címet, pl. Kossuth u. 12" autocomplete="off" autocorrect="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest">
+        </label>
+        <ul id="suggest" class="suggest" role="listbox"></ul>
+      </div>
       <label class="field"><span>Megjegyzés (nem kötelező)</span>
         <textarea id="note" maxlength="200" placeholder="pl. Kit-Kat és Snickers, 6-ig van otthon"></textarea>
       </label>
-      <label class="field"><span>Koordináta vagy Google Térkép link</span>
-        <input type="text" id="coords" placeholder="47.49791, 19.04024" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <label class="field"><span>Koordináta vagy Google Térkép link (mobilos is jó)</span>
+        <input type="text" id="coords" placeholder="47.49791, 19.04024 vagy https://maps.app.goo.gl/…" autocomplete="off" autocapitalize="off" spellcheck="false">
       </label>
-      <div id="coordHint">Ezt nem ismerem fel. Írj be „szélesség, hosszúság” formát, vagy illeszd be a teljes Google Térkép linket.</div>
+      <div id="coordHint"></div>
       <div class="row" style="margin-bottom:10px">
         <button class="btn" id="btnHere">📍 Saját helyzetem</button>
       </div>
@@ -448,10 +470,12 @@
   function parseCoords(text) {
     text = String(text || '').trim();
     if (!text) return null;
-    var num = '(-?\\d+(?:\\.\\d+)?)';
-    var m = text.match(new RegExp('@' + num + ',' + num)) ||
-            text.match(new RegExp('!3d' + num + '!4d' + num)) ||
-            text.match(new RegExp('[?&](?:q|query|ll|destination)=' + num + '(?:,|%2C)\\s*' + num, 'i')) ||
+    var num = '(-?\\d{1,3}(?:\\.\\d+)?)';
+    var sep = '(?:,|%2C|\\+|%20|\\s)+';
+    var m = text.match(new RegExp('!3d' + num + '!4d' + num)) ||
+            text.match(new RegExp('[?&;](?:q|query|ll|sll|center|destination|daddr)=(?:loc:|loc%3A)?\\+?' + num + sep + num, 'i')) ||
+            text.match(new RegExp('/(?:place|search|dir)/' + num + ',' + num + '(?:[/?@]|$)')) ||
+            text.match(new RegExp('@' + num + ',' + num)) ||
             text.match(new RegExp('^' + num + '\\s*[,;\\s]\\s*' + num + '$'));
     if (!m) return null;
     var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
@@ -459,20 +483,103 @@
     return { lat: lat, lng: lng };
   }
 
+  function setHint(msg, info) {
+    var hint = $('#coordHint');
+    if (!msg) { hint.style.display = 'none'; return; }
+    hint.textContent = msg;
+    hint.className = info ? 'info' : '';
+    hint.style.display = 'block';
+  }
+
   function syncCoords() {
     if (!document.body.classList.contains('adding') || document.activeElement === coordsInput) return;
     var c = map.getCenter();
     coordsInput.value = c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
-    $('#coordHint').style.display = 'none';
+    setHint('');
   }
   map.on('move', syncCoords);
 
+  function hasLink(t) { return /https?:\/\/[^\s\/]+\.[a-z]{2,}/i.test(t); }
+
+  /* Rövid mobilos linkek (maps.app.goo.gl/…) feloldása a szerveren keresztül */
+  var resolveSeq = 0, resolveTimer;
+  function resolveInto(text) {
+    var seq = ++resolveSeq;
+    setHint('⏳ Link feloldása…', true);
+    return api('/api/resolve?url=' + encodeURIComponent(text)).then(function (r) {
+      if (seq !== resolveSeq) return null; // közben átírták a mezőt
+      coordsInput.value = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
+      setHint('');
+      map.setView([r.lat, r.lng], Math.max(map.getZoom(), 17), { animate: false });
+      if (r.name && !$('#name').value.trim()) $('#name').value = r.name.slice(0, 60);
+      toast('Link feloldva ✔');
+      return { lat: r.lat, lng: r.lng };
+    }).catch(function (e) {
+      if (seq === resolveSeq) setHint(e.message || 'Nem sikerült feloldani a linket.');
+      return null;
+    });
+  }
+
   coordsInput.addEventListener('input', function () {
-    var c = parseCoords(coordsInput.value);
-    $('#coordHint').style.display = (!c && coordsInput.value.trim()) ? 'block' : 'none';
-    if (c) map.setView([c.lat, c.lng], Math.max(map.getZoom(), 17), { animate: false });
+    clearTimeout(resolveTimer);
+    resolveSeq++;
+    var v = coordsInput.value, c = parseCoords(v);
+    if (c) { setHint(''); map.setView([c.lat, c.lng], Math.max(map.getZoom(), 17), { animate: false }); return; }
+    if (!v.trim()) { setHint(''); return; }
+    if (hasLink(v)) { resolveTimer = setTimeout(function () { resolveInto(v); }, 500); return; }
+    setHint('Ezt nem ismerem fel. Írj be „szélesség, hosszúság” formát, vagy illeszd be a Google Térkép linket.');
   });
   coordsInput.addEventListener('blur', syncCoords);
+
+  /* ------------------------- címjavaslatok ------------------------- */
+  var nameInput = $('#name'), sug = $('#suggest'), sugTimer, sugSeq = 0;
+
+  function hideSug() {
+    sug.classList.remove('show');
+    sug.textContent = '';
+    nameInput.setAttribute('aria-expanded', 'false');
+  }
+  function showSug(items, statusText) {
+    sug.textContent = '';
+    if (statusText) sug.append(el('li', { class: 'status', text: statusText }));
+    items.forEach(function (it) {
+      sug.append(el('li', {
+        role: 'option',
+        // mousedown-nál ne vegye el a fókuszt a mezőtől, különben a lista előbb eltűnik, mint a koppintás
+        onmousedown: function (e) { e.preventDefault(); },
+        onclick: function () { pickSug(it); }
+      }, el('strong', { text: it.title }), it.sub ? el('span', { text: it.sub }) : null));
+    });
+    sug.classList.add('show');
+    nameInput.setAttribute('aria-expanded', 'true');
+  }
+  function pickSug(it) {
+    sugSeq++;
+    nameInput.value = it.title.slice(0, 60);
+    hideSug();
+    coordsInput.value = it.lat.toFixed(5) + ', ' + it.lng.toFixed(5);
+    setHint('');
+    map.setView([it.lat, it.lng], Math.max(map.getZoom(), 17), { animate: false });
+    nameInput.blur(); // mobilon becsukja a billentyűzetet, így látszik a térkép
+  }
+
+  nameInput.addEventListener('input', function () {
+    clearTimeout(sugTimer);
+    var q = nameInput.value.trim();
+    var seq = ++sugSeq;
+    if (q.length < 3) { hideSug(); return; }
+    sugTimer = setTimeout(function () {
+      var c = map.getCenter();
+      api('/api/geocode?q=' + encodeURIComponent(q) + '&lat=' + c.lat.toFixed(4) + '&lng=' + c.lng.toFixed(4))
+        .then(function (items) {
+          if (seq !== sugSeq || document.activeElement !== nameInput) return;
+          if (items.length) showSug(items);
+          else showSug([], 'Nincs találat – a beírt név így is használható');
+        })
+        .catch(function () { if (seq === sugSeq) hideSug(); });
+    }, 350);
+  });
+  nameInput.addEventListener('blur', function () { sugSeq++; clearTimeout(sugTimer); hideSug(); });
 
   function startAdd() {
     closeSheet();
@@ -485,14 +592,19 @@
   }
   function cancelAdd() {
     document.body.classList.remove('adding');
-    $('#coordHint').style.display = 'none';
+    resolveSeq++; hideSug(); setHint('');
     setTimeout(function () { map.invalidateSize(); }, 50);
   }
 
   function save() {
+    var c = parseCoords(coordsInput.value);
+    if (!c && hasLink(coordsInput.value)) {
+      // még nincs feloldva a (rövid) link – előbb azt oldjuk fel, aztán mentünk
+      resolveInto(coordsInput.value).then(function (r) { if (r) save(); });
+      return;
+    }
     var name = $('#name').value.trim();
     if (!name) { toast('Adj nevet a helynek!'); $('#name').focus(); return; }
-    var c = parseCoords(coordsInput.value);
     if (!c) { toast('A koordináta nem érvényes'); coordsInput.focus(); return; }
     var btn = $('#btnSave');
     btn.disabled = true;
@@ -511,8 +623,8 @@
   }
 
   /* ------------------------------ lista ------------------------------ */
-  function openSheet() { $('#sheet').classList.add('open'); $('#sheet').setAttribute('aria-hidden', 'false'); }
-  function closeSheet() { $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
+  function openSheet() { hideSug(); document.body.classList.add('sheet-open'); $('#sheet').classList.add('open'); $('#sheet').setAttribute('aria-hidden', 'false'); }
+  function closeSheet() { document.body.classList.remove('sheet-open'); $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
 
   $('#btnAdd').addEventListener('click', startAdd);
   $('#btnCancel').addEventListener('click', cancelAdd);

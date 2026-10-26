@@ -5,7 +5,7 @@ Mobilbarát webapp Halloweenre: bárki felvehet helyeket (ahol cukrot lehet gyű
 ## Funkciók
 
 - Sötét, Halloween hangulatú térkép (Leaflet + OpenStreetMap csempék CSS-szűrővel sötétítve – nem kell API kulcs)
-- **Új hely**: térkép húzásával (📍 a közepén), saját helyzetből, vagy beillesztett koordinátával / Google Térkép linkkel
+- **Új hely**: térkép húzásával (📍 a közepén), saját helyzetből, **címkereséssel** (a hely nevénél gépelve címjavaslatok jönnek), vagy beillesztett koordinátával / Google Térkép linkkel (a mobilos rövid `maps.app.goo.gl/…` linkek is működnek – a szerver oldja fel)
 - Minden helyhez: név, megjegyzés, „Elfogyott a cukor 💀 / Mégis van még 🍬” jelölés
 - „Útvonal a Google Térképen” és „Megnyitás Google Térképen” gomb minden helynél
 - Lista a legközelebbi helyekkel (ha engedélyezed a helymeghatározást)
@@ -50,3 +50,9 @@ Ha az „elfogyott / van még” jelölést is csak te szeretnéd végezni, áll
 ## Mobilról
 
 A Helymeghatározáshoz HTTPS kell – a Render ezt automatikusan adja. iPhone-on és Androidon is működik, a kezdőképernyőre is felrakható.
+
+## Link feloldás és címkeresés
+
+- `GET /api/resolve?url=…` – Google Térkép link (rövid is) → koordináta. A szerver csak Google-os hosztokat követ (SSRF ellen), a EU-s „cookie hozzájárulás” átirányítást is kezeli.
+- `GET /api/geocode?q=…` – címjavaslatok a [Photon](https://photon.komoot.io) (OpenStreetMap) szolgáltatással, hiba esetén Nominatim tartalékkal. API kulcs nem kell.
+- Mindkettő csak adminnak érhető el, hogy ne lehessen nyílt proxyként használni.
