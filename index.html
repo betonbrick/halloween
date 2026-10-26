@@ -52,6 +52,8 @@
 
   #mapwrap { position: relative; flex: 1; min-height: 0; }
   #map { position: absolute; inset: 0; background: #0e0819; }
+  /* sötét, lilás Halloween-hangulat a sima OSM csempékből (API kulcs nélkül) */
+  #map .leaflet-tile-pane { filter: invert(1) hue-rotate(200deg) brightness(.85) contrast(.95) saturate(.7); }
 
   #crosshair {
     position: absolute; left: 50%; top: 50%; z-index: 500; pointer-events: none;
@@ -257,9 +259,9 @@
   /* ---------------------------- térkép ---------------------------- */
   var map = L.map('map', { zoomControl: false, tap: true }).setView([47.1625, 19.5033], 7);
   L.control.zoom({ position: 'topright' }).addTo(map);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, subdomains: 'abcd',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
   if (window.ResizeObserver) new ResizeObserver(function () { map.invalidateSize(); }).observe($('#mapwrap'));
