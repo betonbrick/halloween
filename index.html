@@ -512,6 +512,14 @@
     var mc = map.getCenter();
     return api('/api/resolve?url=' + encodeURIComponent(text) + '&lat=' + mc.lat.toFixed(3) + '&lng=' + mc.lng.toFixed(3)).then(function (r) {
       if (seq !== resolveSeq) return null; // közben átírták a mezőt
+      if (r.approx) {
+        // Nincs pontos koordináta a linkben – a felhasználó választja ki a helyeset
+        setHint('');
+        showSug(r.candidates, 'A linkből csak a név derül ki („' + (r.name || '?') + '”). Melyik ez a hely?', {
+          keepName: true, fallbackName: r.name, closeRow: true
+        });
+        return null;
+      }
       coordsInput.value = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
       setHint('');
       map.setView([r.lat, r.lng], Math.max(map.getZoom(), 17), { animate: false });
@@ -558,7 +566,8 @@
     sug.textContent = '';
     nameInput.setAttribute('aria-expanded', 'false');
   }
-  function showSug(items, statusText) {
+  function showSug(items, statusText, opts) {
+    opts = opts || {};
     sug.textContent = '';
     if (statusText) sug.append(el('li', { class: 'status', text: statusText }));
     items.forEach(function (it) {
@@ -566,9 +575,10 @@
         role: 'option',
         // mousedown-nál ne vegye el a fókuszt a mezőtől, különben a lista előbb eltűnik, mint a koppintás
         onmousedown: function (e) { e.preventDefault(); },
-        onclick: function () { pickSug(it); }
+        onclick: function () { pickSug(it, opts); }
       }, el('strong', { text: it.title }), it.sub ? el('span', { text: it.sub }) : null));
     });
+    if (opts.closeRow) sug.append(el('li', { class: 'status', text: '✕ Egyik sem – bezárás', onclick: hideSug }));
     sug.classList.add('show');
     document.body.classList.add('sug-open');
     nameInput.setAttribute('aria-expanded', 'true');
@@ -576,9 +586,11 @@
     requestAnimationFrame(fitSug);
     setTimeout(fitSug, 250); // a billentyűzet animációja után még egyszer
   }
-  function pickSug(it) {
+  function pickSug(it, opts) {
+    opts = opts || {};
     sugSeq++;
-    nameInput.value = it.title.slice(0, 60);
+    if (!opts.keepName) nameInput.value = it.title.slice(0, 60);
+    else if (!nameInput.value.trim()) nameInput.value = (opts.fallbackName || it.title).slice(0, 60);
     hideSug();
     coordsInput.value = it.lat.toFixed(5) + ', ' + it.lng.toFixed(5);
     setHint('');
@@ -602,6 +614,7 @@
         .catch(function () { if (seq === sugSeq) hideSug(); });
     }, 350);
   });
+  map.on('click dragstart', function () { if (sug.classList.contains('show')) { sugSeq++; hideSug(); } });
   nameInput.addEventListener('blur', function () { sugSeq++; clearTimeout(sugTimer); hideSug(); });
 
   function startAdd() {

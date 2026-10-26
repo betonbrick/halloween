@@ -54,6 +54,34 @@ function coordsFromString(text) {
   return null;
 }
 
+/** Az oldalban talált ÖSSZES koordináta-jelölt (a hívó ellenőrzi, melyik hihető). */
+function allCoordsFromHtml(html) {
+  const n = '(-?\\d{1,3}\\.\\d+)';
+  const res = [
+    [new RegExp('!3d' + n + '!4d' + n, 'g'), false],
+    [new RegExp('@' + n + ',' + n, 'g'), false],
+    [new RegExp('center=' + n + '(?:%2C|%2c|,)' + n, 'g'), false],
+    [new RegExp('\\[null,null,' + n + ',' + n + '\\]', 'g'), false],
+    // APP_INITIALIZATION_STATE=[[[távolság,HOSSZ,SZÉL]
+    [new RegExp('INITIALIZATION_STATE=\\[\\[\\[[\\d.]+,' + n + ',' + n, 'g'), true],
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const [re, swap] of res) {
+    let m;
+    while ((m = re.exec(html)) && out.length < 30) {
+      const a = parseFloat(m[1]), b = parseFloat(m[2]);
+      const lat = swap ? b : a, lng = swap ? a : b;
+      if (!validLat(lat) || !validLng(lng)) continue;
+      const k = lat.toFixed(4) + ',' + lng.toFixed(4);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ lat, lng });
+    }
+  }
+  return out;
+}
+
 /** A Google oldal <title>-jéből a hely neve ("Kenderes - Google Térkép") */
 function nameFromHtml(html) {
   const m = String(html).match(/<title>([^<]{1,200})<\/title>/i);
@@ -120,6 +148,7 @@ async function resolveMapsUrl(input, fetchImpl) {
 
   let lastUrl = url.href;
   let htmlName = '';
+  let htmlCoords = [];
   for (let hop = 0; hop < 8; hop++) {
     const res = await doFetch(url.href, {
       redirect: 'manual',
@@ -148,10 +177,11 @@ async function resolveMapsUrl(input, fetchImpl) {
     }
 
     if (res.ok) {
-      // FIGYELEM: az oldal HTML-jében talált koordinátákat szándékosan nem használjuk –
-      // a Google ott a szerver helye szerinti alapnézetet (pl. Los Angeles) adja.
+      // A HTML-ben talált koordináták NEM megbízhatók önmagukban (a Google a szerver helye szerinti
+      // alapnézetet, pl. Los Angelest is beleírhatja) – a hívó ellenőrzi őket a hely nevével.
       const html = (await res.text()).slice(0, 500_000);
       htmlName = nameFromHtml(html);
+      htmlCoords = allCoordsFromHtml(html);
     }
     break;
   }
@@ -162,6 +192,7 @@ async function resolveMapsUrl(input, fetchImpl) {
   const err = new Error('Nem találtam koordinátát a linkben.');
   err.status = 422;
   err.name_ = name;
+  err.htmlCoords = htmlCoords;
   throw err;
 }
 
@@ -194,6 +225,33 @@ function nominatimItem(r) {
     lat: parseFloat(r.lat),
     lng: parseFloat(r.lon),
   };
+}
+
+const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** Fordított keresés: mi van ezen a koordinátán? (annak ellenőrzésére, hogy a HTML-ből kinyert pont hihető-e) */
+async function reverse(lat, lng, fetchImpl) {
+  const doFetch = fetchImpl || fetch;
+  try {
+    const r = await doFetch('https://photon.komoot.io/reverse?limit=5&lat=' + lat + '&lon=' + lng, {
+      headers: { 'User-Agent': UA_APP, Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j.features || []).map((f) => f.properties || {});
+  } catch (_) { return []; }
+}
+
+/** Egyezik-e a link neve ("Dózsa György út, Kenderes") a koordinátán lévő hellyel? */
+function placeMatches(linkName, props) {
+  const first = norm(String(linkName || '').split(',')[0]);
+  if (first.length < 3) return false;
+  return props.some((p) => [p.name, p.street].some((v) => {
+    const x = norm(v);
+    return x && (x === first || x.includes(first) || first.includes(x));
+  }));
 }
 
 const cache = new Map();
@@ -255,7 +313,7 @@ async function geocode(q, bias, fetchImpl) {
 }
 
 
-  return { coordsFromString, nameFromHtml, nameFromUrl, extractUrl, resolveMapsUrl, geocode, photonItem };
+  return { coordsFromString, nameFromHtml, allCoordsFromHtml, nameFromUrl, extractUrl, resolveMapsUrl, geocode, reverse, placeMatches, photonItem };
 })();
 
 const PORT = process.env.PORT || 3000;
@@ -481,11 +539,52 @@ app.get('/api/resolve', requireAdmin, wrap(async (req, res) => {
   try {
     return res.json(await maps.resolveMapsUrl(input));
   } catch (e) {
-    // Ha van név, de koordináta nincs a linkben, megpróbáljuk név alapján megkeresni
-    if (e.name_) {
+    // Nincs pontos koordináta a linkben (pl. egy utca vagy település). NEM találgatunk:
+    // jelölteket adunk vissza, és a felhasználó választja ki a helyeset.
+    // (Egy „Dózsa György út” keresésre minden városból van találat – az első jellemzően rossz.)
+    const link = maps.extractUrl(input);
+    const extra = link ? input.replace(link, '').replace(/\s+/g, ' ').trim() : ''; // a megosztott szöveg címe
+    const queries = [extra, e.name_].filter((q, i, arr) => q && q.length >= 3 && arr.indexOf(q) === i);
+    if (queries.length) {
       const bl = parseFloat(req.query.lat), bg = parseFloat(req.query.lng);
-      const found = await maps.geocode(e.name_, Number.isFinite(bl) && Number.isFinite(bg) ? { lat: bl, lng: bg } : null);
-      if (found.length) return res.json({ lat: found[0].lat, lng: found[0].lng, name: e.name_ });
+      const bias = Number.isFinite(bl) && Number.isFinite(bg) ? { lat: bl, lng: bg } : null;
+      const seen = new Set();
+      let candidates = [];
+      for (const q of queries) {
+        for (const c of await maps.geocode(q, bias)) {
+          const k = c.lat.toFixed(4) + ',' + c.lng.toFixed(4);
+          if (!seen.has(k)) { seen.add(k); candidates.push(c); }
+        }
+      }
+      candidates = candidates.slice(0, 6);
+      // Az oldalban talált koordináta akkor hihető, ha a név szerinti találatok egyikéhez közel van.
+      // (A Los Angeles-i alapnézet így kiesik, a valódi hely viszont pontos koordinátát ad.)
+      const near = (a, b) => {
+        const R = 6371, rad = Math.PI / 180;
+        const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+        const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(x));
+      };
+      let best = null;
+      const hcs = (e.htmlCoords || []).slice(0, 4);
+      for (const hc of hcs) {
+        for (const c of candidates) {
+          const d = near(hc, c);
+          if (d <= 8 && (!best || d < best.d)) best = { d, lat: hc.lat, lng: hc.lng };
+        }
+      }
+      // Ha a névre kapott találatok között nincs a helyes, a koordinátán lévő hely nevét vetjük össze a linkével
+      if (!best) {
+        for (const hc of hcs) {
+          if (maps.placeMatches(e.name_ || extra, await maps.reverse(hc.lat, hc.lng))) {
+            best = { d: 0, lat: hc.lat, lng: hc.lng };
+            break;
+          }
+        }
+      }
+      console.log('[resolve] html-jelöltek:', (e.htmlCoords || []).length, '| elfogadott:', best ? best.lat + ',' + best.lng : 'nincs');
+      if (best) return res.json({ lat: best.lat, lng: best.lng, name: e.name_ || extra });
+      if (candidates.length) return res.json({ approx: true, name: e.name_ || extra, candidates });
     }
     const status = e.status || 502;
     const msg = status === 400 || status === 422
