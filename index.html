@@ -346,13 +346,6 @@
       href: 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng,
       text: '🗺️ Megnyitás Google Térképen'
     }));
-    if (isAdmin || publicStatus) {
-      actions.append(el('button', {
-        class: 'btn',
-        text: gone ? '🍬 Mégis van még cukor' : '💀 Elfogyott a cukor',
-        onclick: function () { setStatus(s, gone ? 'van' : 'elfogyott'); }
-      }));
-    }
     if (isAdmin) actions.append(el('button', { class: 'btn danger', text: '🗑️ Hely törlése', onclick: function () { removeSpot(s); } }));
     box.append(actions);
     return box;
