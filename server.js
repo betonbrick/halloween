@@ -54,13 +54,13 @@ function coordsFromString(text) {
   return null;
 }
 
-/** Szöveges keresés a HTML-ben (a konkrét hely beágyazott adataiban) */
-function coordsFromHtml(html) {
-  const c = coordsFromString(html);
-  if (c) return c;
-  // APP_INITIALIZATION_STATE: [null,null,LAT,LNG]
-  const m = String(html).match(/\[null,null,(-?\d{1,2}\.\d{3,}),(-?\d{1,3}\.\d{3,})\]/);
-  return pair(m);
+/** A Google oldal <title>-jéből a hely neve ("Kenderes - Google Térkép") */
+function nameFromHtml(html) {
+  const m = String(html).match(/<title>([^<]{1,200})<\/title>/i);
+  if (!m) return '';
+  const t = m[1].replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/\s*[-–]\s*Google\s+(?:Maps|Térkép)\s*$/i, '').trim();
+  return /^Google\s+(?:Maps|Térkép)$/i.test(t) ? '' : t;
 }
 
 function safeDecode(s) {
@@ -119,6 +119,7 @@ async function resolveMapsUrl(input, fetchImpl) {
   }
 
   let lastUrl = url.href;
+  let htmlName = '';
   for (let hop = 0; hop < 8; hop++) {
     const res = await doFetch(url.href, {
       redirect: 'manual',
@@ -147,15 +148,17 @@ async function resolveMapsUrl(input, fetchImpl) {
     }
 
     if (res.ok) {
-      const html = (await res.text()).slice(0, 2_000_000);
-      const c = coordsFromHtml(html);
-      if (c) return { ...c, name: nameFromUrl(lastUrl) };
+      // FIGYELEM: az oldal HTML-jében talált koordinátákat szándékosan nem használjuk –
+      // a Google ott a szerver helye szerinti alapnézetet (pl. Los Angeles) adja.
+      const html = (await res.text()).slice(0, 500_000);
+      htmlName = nameFromHtml(html);
     }
     break;
   }
 
   // Nincs koordináta, de a név megvan → a hívó megpróbálhatja geokódolni
-  const name = nameFromUrl(lastUrl);
+  console.log('[resolve] nincs koordináta; utolsó url:', lastUrl.slice(0, 200), '| név:', nameFromUrl(lastUrl) || htmlName);
+  const name = nameFromUrl(lastUrl) || htmlName;
   const err = new Error('Nem találtam koordinátát a linkben.');
   err.status = 422;
   err.name_ = name;
@@ -252,7 +255,7 @@ async function geocode(q, bias, fetchImpl) {
 }
 
 
-  return { coordsFromString, coordsFromHtml, nameFromUrl, extractUrl, resolveMapsUrl, geocode, photonItem };
+  return { coordsFromString, nameFromHtml, nameFromUrl, extractUrl, resolveMapsUrl, geocode, photonItem };
 })();
 
 const PORT = process.env.PORT || 3000;
@@ -480,7 +483,8 @@ app.get('/api/resolve', requireAdmin, wrap(async (req, res) => {
   } catch (e) {
     // Ha van név, de koordináta nincs a linkben, megpróbáljuk név alapján megkeresni
     if (e.name_) {
-      const found = await maps.geocode(e.name_, null);
+      const bl = parseFloat(req.query.lat), bg = parseFloat(req.query.lng);
+      const found = await maps.geocode(e.name_, Number.isFinite(bl) && Number.isFinite(bg) ? { lat: bl, lng: bg } : null);
       if (found.length) return res.json({ lat: found[0].lat, lng: found[0].lng, name: e.name_ });
     }
     const status = e.status || 502;

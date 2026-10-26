@@ -124,6 +124,9 @@
     box-shadow: 0 -8px 24px rgba(0, 0, 0, .55); display: none;
   }
   .suggest.show { display: block; }
+  /* amíg a lista nyitva van, a többi mező eltűnik, hogy a billentyűzet mellett is elférjen */
+  body.sug-open .hide-on-sug { display: none !important; }
+  body.sug-open .field { margin-bottom: 0; }
   .suggest li { display: flex; flex-direction: column; gap: 1px; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
   .suggest li + li { border-top: 1px solid rgba(255, 255, 255, .06); }
   .suggest li:active, .suggest li.hl { background: rgba(255, 122, 24, .22); }
@@ -217,24 +220,24 @@
     </div>
 
     <div id="addpanel">
-      <p class="tip">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
+      <p class="tip hide-on-sug">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
       <div class="ac">
         <label class="field"><span>Hely neve / címe</span>
           <input type="text" id="name" maxlength="60" placeholder="Kezdj el írni egy címet, pl. Kossuth u. 12" autocomplete="off" autocorrect="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest">
         </label>
         <ul id="suggest" class="suggest" role="listbox"></ul>
       </div>
-      <label class="field"><span>Megjegyzés (nem kötelező)</span>
+      <label class="field hide-on-sug"><span>Megjegyzés (nem kötelező)</span>
         <textarea id="note" maxlength="200" placeholder="pl. Kit-Kat és Snickers, 6-ig van otthon"></textarea>
       </label>
-      <label class="field"><span>Koordináta vagy Google Térkép link (mobilos is jó)</span>
+      <label class="field hide-on-sug"><span>Koordináta vagy Google Térkép link (mobilos is jó)</span>
         <input type="text" id="coords" placeholder="47.49791, 19.04024 vagy https://maps.app.goo.gl/…" autocomplete="off" autocapitalize="off" spellcheck="false">
       </label>
-      <div id="coordHint"></div>
-      <div class="row" style="margin-bottom:10px">
+      <div id="coordHint" class="hide-on-sug"></div>
+      <div class="row hide-on-sug" style="margin-bottom:10px">
         <button class="btn" id="btnHere">📍 Saját helyzetem</button>
       </div>
-      <div class="row">
+      <div class="row hide-on-sug">
         <button class="btn" id="btnCancel">Mégse</button>
         <button class="btn primary" id="btnSave">🍬 Mentés</button>
       </div>
@@ -506,7 +509,8 @@
   function resolveInto(text) {
     var seq = ++resolveSeq;
     setHint('⏳ Link feloldása…', true);
-    return api('/api/resolve?url=' + encodeURIComponent(text)).then(function (r) {
+    var mc = map.getCenter();
+    return api('/api/resolve?url=' + encodeURIComponent(text) + '&lat=' + mc.lat.toFixed(3) + '&lng=' + mc.lng.toFixed(3)).then(function (r) {
       if (seq !== resolveSeq) return null; // közben átírták a mezőt
       coordsInput.value = r.lat.toFixed(5) + ', ' + r.lng.toFixed(5);
       setHint('');
@@ -534,7 +538,22 @@
   /* ------------------------- címjavaslatok ------------------------- */
   var nameInput = $('#name'), sug = $('#suggest'), sugTimer, sugSeq = 0;
 
+  // A lista magassága = a látható terület (billentyűzet nélkül) és a mező teteje közötti hely
+  function fitSug() {
+    if (!sug.classList.contains('show')) return;
+    var vv = window.visualViewport;
+    var top = vv ? vv.offsetTop : 0;
+    var avail = $('.ac').getBoundingClientRect().top - top - 8;
+    sug.style.maxHeight = Math.max(60, Math.min(320, avail)) + 'px';
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fitSug);
+    window.visualViewport.addEventListener('scroll', fitSug);
+  }
+  window.addEventListener('resize', fitSug);
+
   function hideSug() {
+    document.body.classList.remove('sug-open');
     sug.classList.remove('show');
     sug.textContent = '';
     nameInput.setAttribute('aria-expanded', 'false');
@@ -551,7 +570,11 @@
       }, el('strong', { text: it.title }), it.sub ? el('span', { text: it.sub }) : null));
     });
     sug.classList.add('show');
+    document.body.classList.add('sug-open');
     nameInput.setAttribute('aria-expanded', 'true');
+    fitSug();
+    requestAnimationFrame(fitSug);
+    setTimeout(fitSug, 250); // a billentyűzet animációja után még egyszer
   }
   function pickSug(it) {
     sugSeq++;
