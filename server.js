@@ -153,7 +153,23 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '5m' }));
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
+console.log('[start] server.js helye:', __dirname);
+console.log('[start] keresett index.html:', INDEX_FILE, '->', fs.existsSync(INDEX_FILE) ? 'MEGVAN' : 'HIÁNYZIK');
+try { console.log('[start] mappa tartalma:', fs.readdirSync(__dirname).join(', ')); } catch (_) {}
+
+app.use(express.static(PUBLIC_DIR, { maxAge: '5m' }));
+
+app.get('/', (_req, res) => {
+  if (!fs.existsSync(INDEX_FILE)) {
+    return res.status(500).type('text').send(
+      'Hiányzik a public/index.html.\nKeresett hely: ' + INDEX_FILE +
+      '\nA server.js mappájában: ' + fs.readdirSync(__dirname).join(', ')
+    );
+  }
+  res.sendFile(INDEX_FILE);
+});
 
 app.get('/healthz', (_req, res) => res.send('ok'));
 
