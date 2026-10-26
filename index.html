@@ -50,6 +50,20 @@
     padding: 6px 12px; border-radius: 999px; white-space: nowrap;
   }
 
+  .hright { display: flex; align-items: center; gap: 8px; }
+  .admin-badge {
+    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; color: #2a1200;
+    background: linear-gradient(180deg, var(--orange2), var(--orange)); border: 0;
+    padding: 6px 10px; border-radius: 999px; white-space: nowrap;
+  }
+
+  @media (max-width: 400px) {
+    h1 { font-size: 24px; }
+    #count { padding: 5px 9px; font-size: 13px; }
+    .admin-badge { padding: 5px 8px; font-size: 12px; }
+    header { padding-left: 12px; padding-right: 12px; }
+  }
+
   #mapwrap { position: relative; flex: 1; min-height: 0; }
   #map { position: absolute; inset: 0; background: #0e0819; }
   /* sötét, lilás Halloween-hangulat a sima OSM csempékből (API kulcs nélkül) */
@@ -165,7 +179,10 @@
 <body>
   <header>
     <h1>🎃 Cukorvadászat</h1>
-    <div id="count">… hely</div>
+    <div class="hright">
+      <button id="adminBadge" class="admin-badge" style="display:none" title="Admin mód – koppints a kilépéshez">🔑 Admin</button>
+      <div id="count">… hely</div>
+    </div>
   </header>
 
   <div id="mapwrap">
@@ -218,7 +235,12 @@
   'use strict';
 
   var $ = function (s) { return document.querySelector(s); };
-  var ADMIN = new URLSearchParams(location.search).get('admin') || '';
+  // Admin kulcs: ?admin=KULCS a linkben, utána a böngésző megjegyzi
+  var urlParams = new URLSearchParams(location.search);
+  var ADMIN = urlParams.get('admin') || '';
+  if (!ADMIN) { try { ADMIN = localStorage.getItem('cv_admin') || ''; } catch (e) { /* nincs tárhely */ } }
+  var isAdmin = false;
+  var publicStatus = true;
 
   function el(tag, attrs) {
     var e = document.createElement(tag);
@@ -299,12 +321,14 @@
       href: 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng,
       text: '🗺️ Megnyitás Google Térképen'
     }));
-    actions.append(el('button', {
-      class: 'btn',
-      text: gone ? '🍬 Mégis van még cukor' : '💀 Elfogyott a cukor',
-      onclick: function () { setStatus(s, gone ? 'van' : 'elfogyott'); }
-    }));
-    if (ADMIN) actions.append(el('button', { class: 'btn danger', text: '🗑️ Törlés (admin)', onclick: function () { removeSpot(s); } }));
+    if (isAdmin || publicStatus) {
+      actions.append(el('button', {
+        class: 'btn',
+        text: gone ? '🍬 Mégis van még cukor' : '💀 Elfogyott a cukor',
+        onclick: function () { setStatus(s, gone ? 'van' : 'elfogyott'); }
+      }));
+    }
+    if (isAdmin) actions.append(el('button', { class: 'btn danger', text: '🗑️ Hely törlése', onclick: function () { removeSpot(s); } }));
     box.append(actions);
     return box;
   }
@@ -394,7 +418,7 @@
   }
 
   function removeSpot(s) {
-    if (!confirm('Biztosan törlöd: ' + s.name + '?')) return;
+    if (!confirm('Biztosan törlöd végleg: ' + s.name + '?')) return;
     api('/api/spots/' + s.id, { method: 'DELETE' }).then(function () {
       spots = spots.filter(function (x) { return x.id !== s.id; });
       map.closePopup();
@@ -498,7 +522,31 @@
   $('#btnList').addEventListener('click', openSheet);
   $('#btnClose').addEventListener('click', closeSheet);
 
-  load(true);
+  function applyMode() {
+    $('#btnAdd').style.display = isAdmin ? '' : 'none';
+    $('#adminBadge').style.display = isAdmin ? '' : 'none';
+  }
+
+  $('#adminBadge').addEventListener('click', function () {
+    if (!confirm('Kilépsz az admin módból ezen az eszközön?')) return;
+    try { localStorage.removeItem('cv_admin'); } catch (e) { /* semmi */ }
+    location.href = location.pathname;
+  });
+
+  // Először megnézzük, admin vagyunk-e, és csak utána töltjük be a helyeket
+  api('/api/config').then(function (cfg) {
+    isAdmin = !!cfg.admin;
+    publicStatus = cfg.publicStatus !== false;
+    if (isAdmin) {
+      try { localStorage.setItem('cv_admin', ADMIN); } catch (e) { /* semmi */ }
+      if (urlParams.get('admin')) history.replaceState(null, '', location.pathname); // kulcs eltüntetése a címsorból
+    } else {
+      try { localStorage.removeItem('cv_admin'); } catch (e) { /* semmi */ }
+      if (urlParams.get('admin')) toast('Hibás admin kulcs');
+      ADMIN = '';
+    }
+  }).catch(function () { /* hiba esetén sima látogatóként megyünk tovább */ })
+    .then(function () { applyMode(); load(true); });
   setInterval(load, 20000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
 })();

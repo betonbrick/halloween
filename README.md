@@ -4,7 +4,7 @@ Mobilbarát webapp Halloweenre: bárki felvehet helyeket (ahol cukrot lehet gyű
 
 ## Funkciók
 
-- Sötét, Halloween hangulatú térkép (Leaflet + OpenStreetMap/CARTO – nem kell API kulcs)
+- Sötét, Halloween hangulatú térkép (Leaflet + OpenStreetMap csempék CSS-szűrővel sötétítve – nem kell API kulcs)
 - **Új hely**: térkép húzásával (📍 a közepén), saját helyzetből, vagy beillesztett koordinátával / Google Térkép linkkel
 - Minden helyhez: név, megjegyzés, „Elfogyott a cukor 💀 / Mégis van még 🍬” jelölés
 - „Útvonal a Google Térképen” és „Megnyitás Google Térképen” gomb minden helynél
@@ -31,15 +31,21 @@ Helyben a helyek a `data/spots.json` fájlba kerülnek. Ha `DATABASE_URL` be van
 >
 > Az ingyenes szolgáltatás inaktivitás után elalszik, az első megnyitás ilyenkor ~30–60 mp. Ezen egy fizetős csomag segít, vagy az esemény előtt nyisd meg egyszer.
 
-## Admin (törlés)
+## Admin
 
-Az `ADMIN_TOKEN` értékét a Render dashboardon találod (Environment). Ha így nyitod meg az oldalt:
+**Új helyet és törlést csak az admin végezhet.** A többi látogató csak nézheti a térképet (és alapból az „elfogyott / van még” jelölést használhatja).
+
+Az `ADMIN_TOKEN` értékét a Render dashboardon találod (Environment). Egyszer nyisd meg az oldalt így:
 
 ```
 https://a-te-címed.onrender.com/?admin=TOKEN
 ```
 
-minden helynél megjelenik egy „Törlés” gomb.
+Ezután a böngésző megjegyzi a kulcsot (a címsorból el is tűnik), a fejlécben megjelenik a 🔑 Admin jelvény, látszik az „➕ Új hely” gomb, és minden helynél van „🗑️ Hely törlése”. A jelvényre koppintva kiléphetsz az admin módból az adott eszközön.
+
+Ha az „elfogyott / van még” jelölést is csak te szeretnéd végezni, állítsd be a Renderen az environment változót: `PUBLIC_STATUS=false`.
+
+> Az admin linket ne oszd meg senkivel, aki nem lehet admin.
 
 ## Mobilról
 

@@ -8,6 +8,8 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const VALID_STATUS = new Set(['van', 'elfogyott']);
+// Ha PUBLIC_STATUS=false, az „elfogyott / van még” jelölést is csak az admin végezheti
+const PUBLIC_STATUS = process.env.PUBLIC_STATUS !== 'false';
 
 /* ------------------------------------------------------------------ *
  *  Tárolás: DATABASE_URL esetén Postgres (Renderen ez kell, mert az   *
@@ -125,27 +127,14 @@ function isAdmin(req) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// Egyszerű IP-alapú korlátozás az új helyek felvételére (spam ellen)
-const hits = new Map();
-function rateLimit(req, res, next) {
-  const now = Date.now();
-  const windowMs = 10 * 60 * 1000;
-  const max = 15;
-  const list = (hits.get(req.ip) || []).filter((t) => now - t < windowMs);
-  if (list.length >= max) {
-    return res.status(429).json({ error: 'Túl sok új hely rövid idő alatt, próbáld kicsit később.' });
-  }
-  list.push(now);
-  hits.set(req.ip, list);
+function requireAdmin(req, res, next) {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Új helyet csak az admin vehet fel.' });
   next();
 }
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, list] of hits) {
-    const fresh = list.filter((t) => now - t < 10 * 60 * 1000);
-    if (fresh.length) hits.set(ip, fresh); else hits.delete(ip);
-  }
-}, 5 * 60 * 1000).unref();
+
+if (!ADMIN_TOKEN) {
+  console.warn('[figyelem] Nincs ADMIN_TOKEN beállítva – új hely felvétele és törlés nem lehetséges!');
+}
 
 /* -------------------------------- app -------------------------------- */
 
@@ -186,7 +175,13 @@ app.get('/api/spots', wrap(async (_req, res) => {
   res.json(await store.list());
 }));
 
-app.post('/api/spots', rateLimit, wrap(async (req, res) => {
+// A felület ebből tudja, hogy admin-e a látogató, és mit tehet
+app.get('/api/config', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ admin: isAdmin(req), publicStatus: PUBLIC_STATUS });
+});
+
+app.post('/api/spots', requireAdmin, wrap(async (req, res) => {
   const name = cleanText(req.body && req.body.name, 60);
   const note = cleanText(req.body && req.body.note, 200);
   const lat = Number(req.body && req.body.lat);
@@ -211,6 +206,7 @@ app.post('/api/spots/:id/status', wrap(async (req, res) => {
   const status = req.body && req.body.status;
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Hibás azonosító.' });
   if (!VALID_STATUS.has(status)) return res.status(400).json({ error: 'Hibás státusz.' });
+  if (!PUBLIC_STATUS && !isAdmin(req)) return res.status(403).json({ error: 'Ezt csak az admin teheti.' });
   const spot = await store.setStatus(id, status);
   if (!spot) return res.status(404).json({ error: 'Nincs ilyen hely.' });
   res.json(spot);
