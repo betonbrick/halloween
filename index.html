@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b0f33">
+<title>Cukorvadászat 🎃</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Creepster&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root {
+    --bg: #150d26;
+    --panel: #21143a;
+    --panel2: #2f1d52;
+    --orange: #ff7a18;
+    --orange2: #ffb347;
+    --green: #9dff4a;
+    --text: #f6eefc;
+    --muted: #b9a9d6;
+    --danger: #ff5d73;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    height: 100vh; height: 100dvh;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    background: linear-gradient(180deg, #2c1655, #1b0f33);
+    border-bottom: 2px solid var(--orange);
+    flex: none;
+  }
+  h1 {
+    margin: 0; font-family: "Creepster", cursive; font-weight: 400;
+    font-size: 30px; letter-spacing: 1px; color: var(--orange);
+    text-shadow: 0 0 14px rgba(255, 122, 24, .45);
+    line-height: 1;
+  }
+  #count {
+    font-size: 14px; font-weight: 700; color: var(--green);
+    background: rgba(157, 255, 74, .1); border: 1px solid rgba(157, 255, 74, .35);
+    padding: 6px 12px; border-radius: 999px; white-space: nowrap;
+  }
+
+  #mapwrap { position: relative; flex: 1; min-height: 0; }
+  #map { position: absolute; inset: 0; background: #0e0819; }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; z-index: 500; pointer-events: none;
+    transform: translate(-50%, -100%); font-size: 44px; line-height: 1;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .6));
+    display: none;
+  }
+  #crosshair::after {
+    content: ""; position: absolute; left: 50%; bottom: -4px; width: 10px; height: 10px;
+    transform: translateX(-50%); border-radius: 50%; background: var(--orange);
+    box-shadow: 0 0 0 4px rgba(255, 122, 24, .3);
+  }
+  body.adding #crosshair { display: block; }
+
+  .bottom { flex: none; background: var(--panel); border-top: 2px solid var(--orange);
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+
+  #bar { display: flex; gap: 10px; }
+  body.adding #bar { display: none; }
+
+  #addpanel { display: none; }
+  body.adding #addpanel { display: block; }
+
+  .btn {
+    min-height: 50px; border: 0; border-radius: 14px; font-size: 16px; font-weight: 700;
+    padding: 0 16px; cursor: pointer; color: var(--text); background: var(--panel2);
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .6; }
+  .btn.primary { background: linear-gradient(180deg, var(--orange2), var(--orange)); color: #2a1200; }
+  #bar .primary { flex: 2; }
+  #bar .btn:not(.primary) { flex: 1; }
+
+  .field { display: block; margin-bottom: 10px; }
+  .field > span { display: block; font-size: 12px; color: var(--muted); margin: 0 2px 4px; text-transform: uppercase; letter-spacing: .5px; }
+  input[type=text], textarea {
+    width: 100%; border: 1px solid #4a3378; background: #170d2b; color: var(--text);
+    border-radius: 12px; padding: 12px; font-size: 16px; font-family: inherit;
+  }
+  textarea { resize: none; height: 56px; }
+  input:focus, textarea:focus { outline: 2px solid var(--orange); border-color: transparent; }
+  #coordHint { display: none; color: var(--danger); font-size: 13px; margin: -4px 2px 8px; }
+  .row { display: flex; gap: 10px; }
+  .row .btn { flex: 1; }
+  .row .btn.primary { flex: 2; }
+  .tip { font-size: 13px; color: var(--muted); margin: 0 2px 10px; }
+
+  /* lista (alulról kicsúszó panel) */
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 2000;
+    max-height: 70vh; max-height: 70dvh; display: flex; flex-direction: column;
+    background: var(--panel); border-top: 2px solid var(--orange);
+    border-radius: 20px 20px 0 0; transform: translateY(105%); transition: transform .25s ease;
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, .5);
+  }
+  #sheet.open { transform: none; }
+  #sheet .head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
+  #sheet h2 { margin: 0; font-size: 18px; color: var(--orange2); }
+  #sheet .x { background: none; border: 0; color: var(--muted); font-size: 28px; line-height: 1; padding: 4px 8px; cursor: pointer; }
+  #list { list-style: none; margin: 0; padding: 0 12px 12px; overflow-y: auto; }
+  #list li {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 12px; margin-bottom: 8px; border-radius: 12px; background: var(--panel2); cursor: pointer;
+  }
+  #list li.gone { opacity: .55; }
+  #list li.empty { cursor: default; justify-content: center; color: var(--muted); }
+  .li-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .li-main strong { overflow: hidden; text-overflow: ellipsis; }
+  .li-main span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list em { font-style: normal; font-size: 13px; color: var(--green); white-space: nowrap; font-weight: 700; }
+
+  /* jelölők */
+  .candy-pin span {
+    display: grid; place-items: center; width: 38px; height: 38px; font-size: 22px;
+    border-radius: 50%; background: var(--panel2); border: 3px solid var(--orange);
+    box-shadow: 0 0 14px rgba(255, 122, 24, .7), 0 3px 6px rgba(0, 0, 0, .5);
+  }
+  .candy-pin.gone span { border-color: #6b6280; box-shadow: none; filter: grayscale(1); opacity: .75; }
+  .me-dot { width: 18px; height: 18px; border-radius: 50%; background: #3ea6ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(62, 166, 255, .3); }
+
+  /* popup */
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+  .leaflet-popup-content-wrapper { border-radius: 16px; border: 1px solid var(--orange); }
+  .leaflet-popup-content { margin: 14px 16px; font-family: inherit; }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+  .pop h3 { margin: 0 20px 6px 0; font-size: 17px; color: var(--orange2); }
+  .pop p { margin: 0 0 8px; font-size: 14px; line-height: 1.35; }
+  .pop .meta { color: var(--green); font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .pop .badge { display: inline-block; background: rgba(255, 93, 115, .18); color: var(--danger); border-radius: 8px; padding: 2px 8px; font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+  .pop .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .pop .btn { min-height: 42px; font-size: 14px; display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--text); text-align: center; }
+  .pop .btn.primary { color: #2a1200; }
+  .pop .btn.danger { background: rgba(255, 93, 115, .2); color: var(--danger); }
+  .leaflet-control-attribution { background: rgba(21, 13, 38, .75) !important; color: var(--muted) !important; }
+  .leaflet-control-attribution a { color: var(--orange2) !important; }
+  .leaflet-bar a { background: var(--panel); color: var(--text); border-color: #4a3378; }
+
+  #toast {
+    position: fixed; left: 50%; top: calc(70px + env(safe-area-inset-top)); z-index: 3000;
+    transform: translate(-50%, -20px); opacity: 0; pointer-events: none; transition: all .25s ease;
+    background: var(--orange); color: #2a1200; font-weight: 700; padding: 10px 16px; border-radius: 999px;
+    max-width: 90vw; text-align: center; box-shadow: 0 6px 20px rgba(0, 0, 0, .5);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🎃 Cukorvadászat</h1>
+    <div id="count">… hely</div>
+  </header>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="crosshair">📍</div>
+  </div>
+
+  <div class="bottom">
+    <div id="bar">
+      <button class="btn primary" id="btnAdd">➕ Új hely</button>
+      <button class="btn" id="btnLocate" aria-label="Hol vagyok?">📍 Én</button>
+      <button class="btn" id="btnList">📋 Lista</button>
+    </div>
+
+    <div id="addpanel">
+      <p class="tip">Told a térképet úgy, hogy a 📍 a megfelelő helyre mutasson – vagy illessz be koordinátát / Google Térkép linket.</p>
+      <label class="field"><span>Hely neve</span>
+        <input type="text" id="name" maxlength="60" placeholder="pl. Kossuth u. 12 – nagy kosár" autocomplete="off">
+      </label>
+      <label class="field"><span>Megjegyzés (nem kötelező)</span>
+        <textarea id="note" maxlength="200" placeholder="pl. Kit-Kat és Snickers, 6-ig van otthon"></textarea>
+      </label>
+      <label class="field"><span>Koordináta vagy Google Térkép link</span>
+        <input type="text" id="coords" placeholder="47.49791, 19.04024" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <div id="coordHint">Ezt nem ismerem fel. Írj be „szélesség, hosszúság” formát, vagy illeszd be a teljes Google Térkép linket.</div>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn" id="btnHere">📍 Saját helyzetem</button>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnCancel">Mégse</button>
+        <button class="btn primary" id="btnSave">🍬 Mentés</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet" aria-hidden="true">
+    <div class="head">
+      <h2>🍬 Összes hely</h2>
+      <button class="x" id="btnClose" aria-label="Bezár">×</button>
+    </div>
+    <ul id="list"></ul>
+  </div>
+
+  <div id="toast" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (s) { return document.querySelector(s); };
+  var ADMIN = new URLSearchParams(location.search).get('admin') || '';
+
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (k === 'class') e.className = v;
+      else if (k === 'text') e.textContent = v;
+      else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), v);
+      else e.setAttribute(k, v);
+    });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i] != null) e.append(arguments[i]);
+    return e;
+  }
+
+  var toastTimer;
+  function toast(msg) {
+    var t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = { 'Content-Type': 'application/json' };
+    if (ADMIN) headers['x-admin-token'] = ADMIN;
+    return fetch(path, Object.assign({}, opts, { headers: headers })).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (data) {
+        if (!res.ok) throw new Error((data && data.error) || 'Hiba történt (' + res.status + ')');
+        return data;
+      });
+    });
+  }
+
+  function fmtDist(m) { return m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(1) + ' km'; }
+
+  /* ---------------------------- térkép ---------------------------- */
+  var map = L.map('map', { zoomControl: false, tap: true }).setView([47.1625, 19.5033], 7);
+  L.control.zoom({ position: 'topright' }).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19, subdomains: 'abcd',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
+
+  if (window.ResizeObserver) new ResizeObserver(function () { map.invalidateSize(); }).observe($('#mapwrap'));
+
+  var spots = [];
+  var markers = new Map();
+  var sigs = new Map();
+  var me = null;
+  var meMarker = null;
+
+  function iconFor(s) {
+    var gone = s.status === 'elfogyott';
+    return L.divIcon({
+      className: 'candy-pin' + (gone ? ' gone' : ''),
+      html: '<span>' + (gone ? '💀' : '🍬') + '</span>',
+      iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18]
+    });
+  }
+
+  function buildPopup(s) {
+    var gone = s.status === 'elfogyott';
+    var box = el('div', { class: 'pop' }, el('h3', { text: s.name }));
+    if (gone) box.append(el('div', { class: 'badge', text: 'Elfogyott a cukor 💀' }));
+    if (s.note) box.append(el('p', { text: s.note }));
+    if (me) box.append(el('div', { class: 'meta', text: '≈ ' + fmtDist(me.distanceTo([s.lat, s.lng])) + ' tőled' }));
+
+    var actions = el('div', { class: 'actions' });
+    actions.append(el('a', {
+      class: 'btn primary', target: '_blank', rel: 'noopener',
+      href: 'https://www.google.com/maps/dir/?api=1&destination=' + s.lat + ',' + s.lng,
+      text: '🧭 Útvonal a Google Térképen'
+    }));
+    actions.append(el('a', {
+      class: 'btn', target: '_blank', rel: 'noopener',
+      href: 'https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lng,
+      text: '🗺️ Megnyitás Google Térképen'
+    }));
+    actions.append(el('button', {
+      class: 'btn',
+      text: gone ? '🍬 Mégis van még cukor' : '💀 Elfogyott a cukor',
+      onclick: function () { setStatus(s, gone ? 'van' : 'elfogyott'); }
+    }));
+    if (ADMIN) actions.append(el('button', { class: 'btn danger', text: '🗑️ Törlés (admin)', onclick: function () { removeSpot(s); } }));
+    box.append(actions);
+    return box;
+  }
+
+  function render() {
+    var seen = new Set();
+    spots.forEach(function (s) {
+      seen.add(s.id);
+      var sig = [s.name, s.note, s.lat, s.lng, s.status].join('|');
+      var m = markers.get(s.id);
+      if (!m) {
+        m = L.marker([s.lat, s.lng], { icon: iconFor(s), title: s.name }).addTo(map);
+        markers.set(s.id, m);
+      } else if (sigs.get(s.id) === sig) {
+        return; // nem változott – ne zárjuk be a nyitott popupot
+      } else {
+        m.setLatLng([s.lat, s.lng]);
+        m.setIcon(iconFor(s));
+      }
+      m.unbindPopup();
+      m.bindPopup(function () { return buildPopup(s); }, { maxWidth: 280, minWidth: 220 });
+      sigs.set(s.id, sig);
+    });
+    markers.forEach(function (m, id) {
+      if (!seen.has(id)) { m.remove(); markers.delete(id); sigs.delete(id); }
+    });
+    var active = spots.filter(function (s) { return s.status !== 'elfogyott'; }).length;
+    $('#count').textContent = active + ' hely';
+    renderList();
+  }
+
+  function renderList() {
+    var ul = $('#list');
+    ul.textContent = '';
+    var items = spots.slice();
+    if (me) items.sort(function (a, b) { return me.distanceTo([a.lat, a.lng]) - me.distanceTo([b.lat, b.lng]); });
+    else items.sort(function (a, b) { return b.id - a.id; });
+
+    if (!items.length) {
+      ul.append(el('li', { class: 'empty', text: 'Még nincs egyetlen hely sem. Légy te az első! 🍬' }));
+      return;
+    }
+    items.forEach(function (s) {
+      var gone = s.status === 'elfogyott';
+      ul.append(el('li', {
+        class: gone ? 'gone' : '',
+        onclick: function () { closeSheet(); focusSpot(s.id); }
+      },
+        el('div', { class: 'li-main' },
+          el('strong', { text: (gone ? '💀 ' : '🍬 ') + s.name }),
+          s.note ? el('span', { text: s.note }) : null),
+        me ? el('em', { text: fmtDist(me.distanceTo([s.lat, s.lng])) }) : null));
+    });
+  }
+
+  function focusSpot(id) {
+    var m = markers.get(id);
+    if (!m) return;
+    map.setView(m.getLatLng(), Math.max(map.getZoom(), 16), { animate: true });
+    m.openPopup();
+  }
+
+  function fitAll() {
+    if (!spots.length) return;
+    var b = L.latLngBounds(spots.map(function (s) { return [s.lat, s.lng]; }));
+    map.fitBounds(b, { padding: [50, 50], maxZoom: 16 });
+  }
+
+  function load(first) {
+    return api('/api/spots').then(function (data) {
+      spots = data;
+      render();
+      if (first) fitAll();
+    }).catch(function () {
+      if (first) toast('Nem sikerült betölteni a helyeket');
+    });
+  }
+
+  function setStatus(s, status) {
+    api('/api/spots/' + s.id + '/status', { method: 'POST', body: JSON.stringify({ status: status }) })
+      .then(function (u) {
+        spots = spots.map(function (x) { return x.id === u.id ? u : x; });
+        map.closePopup();
+        render();
+        toast(status === 'elfogyott' ? 'Megjelölve: elfogyott 💀' : 'Megjelölve: van még cukor 🍬');
+      }).catch(function (e) { toast(e.message); });
+  }
+
+  function removeSpot(s) {
+    if (!confirm('Biztosan törlöd: ' + s.name + '?')) return;
+    api('/api/spots/' + s.id, { method: 'DELETE' }).then(function () {
+      spots = spots.filter(function (x) { return x.id !== s.id; });
+      map.closePopup();
+      render();
+      toast('Törölve');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  /* -------------------------- saját helyzet -------------------------- */
+  function locate(cb) {
+    if (!navigator.geolocation) { toast('A böngésző nem támogatja a helymeghatározást'); return; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      me = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      if (meMarker) meMarker.setLatLng(me);
+      else meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false, keyboard: false }).addTo(map);
+      map.setView(me, Math.max(map.getZoom(), 16), { animate: true });
+      renderList();
+      if (cb) cb();
+    }, function (err) {
+      toast(err.code === 1 ? 'Engedélyezd a helymeghatározást a böngészőben' : 'Nem sikerült meghatározni a helyzeted');
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+  }
+
+  /* ------------------------ új hely felvétele ------------------------ */
+  var coordsInput = $('#coords');
+
+  function parseCoords(text) {
+    text = String(text || '').trim();
+    if (!text) return null;
+    var num = '(-?\\d+(?:\\.\\d+)?)';
+    var m = text.match(new RegExp('@' + num + ',' + num)) ||
+            text.match(new RegExp('!3d' + num + '!4d' + num)) ||
+            text.match(new RegExp('[?&](?:q|query|ll|destination)=' + num + '(?:,|%2C)\\s*' + num, 'i')) ||
+            text.match(new RegExp('^' + num + '\\s*[,;\\s]\\s*' + num + '$'));
+    if (!m) return null;
+    var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+    if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    return { lat: lat, lng: lng };
+  }
+
+  function syncCoords() {
+    if (!document.body.classList.contains('adding') || document.activeElement === coordsInput) return;
+    var c = map.getCenter();
+    coordsInput.value = c.lat.toFixed(5) + ', ' + c.lng.toFixed(5);
+    $('#coordHint').style.display = 'none';
+  }
+  map.on('move', syncCoords);
+
+  coordsInput.addEventListener('input', function () {
+    var c = parseCoords(coordsInput.value);
+    $('#coordHint').style.display = (!c && coordsInput.value.trim()) ? 'block' : 'none';
+    if (c) map.setView([c.lat, c.lng], Math.max(map.getZoom(), 17), { animate: false });
+  });
+  coordsInput.addEventListener('blur', syncCoords);
+
+  function startAdd() {
+    closeSheet();
+    map.closePopup();
+    document.body.classList.add('adding');
+    if (map.getZoom() < 15) {
+      if (me) map.setView(me, 17); else if (!spots.length) map.setView(map.getCenter(), Math.max(map.getZoom(), 12));
+    }
+    setTimeout(function () { map.invalidateSize(); syncCoords(); }, 50);
+  }
+  function cancelAdd() {
+    document.body.classList.remove('adding');
+    $('#coordHint').style.display = 'none';
+    setTimeout(function () { map.invalidateSize(); }, 50);
+  }
+
+  function save() {
+    var name = $('#name').value.trim();
+    if (!name) { toast('Adj nevet a helynek!'); $('#name').focus(); return; }
+    var c = parseCoords(coordsInput.value);
+    if (!c) { toast('A koordináta nem érvényes'); coordsInput.focus(); return; }
+    var btn = $('#btnSave');
+    btn.disabled = true;
+    api('/api/spots', { method: 'POST', body: JSON.stringify({ name: name, note: $('#note').value, lat: c.lat, lng: c.lng }) })
+      .then(function (s) {
+        spots.push(s);
+        render();
+        cancelAdd();
+        $('#name').value = '';
+        $('#note').value = '';
+        focusSpot(s.id);
+        toast('Mentve! 🎃');
+      })
+      .catch(function (e) { toast(e.message); })
+      .then(function () { btn.disabled = false; });
+  }
+
+  /* ------------------------------ lista ------------------------------ */
+  function openSheet() { $('#sheet').classList.add('open'); $('#sheet').setAttribute('aria-hidden', 'false'); }
+  function closeSheet() { $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true'); }
+
+  $('#btnAdd').addEventListener('click', startAdd);
+  $('#btnCancel').addEventListener('click', cancelAdd);
+  $('#btnSave').addEventListener('click', save);
+  $('#btnLocate').addEventListener('click', function () { locate(); });
+  $('#btnHere').addEventListener('click', function () { locate(syncCoords); });
+  $('#btnList').addEventListener('click', openSheet);
+  $('#btnClose').addEventListener('click', closeSheet);
+
+  load(true);
+  setInterval(load, 20000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
+})();
+</script>
+</body>
+</html>
