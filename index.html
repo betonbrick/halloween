@@ -420,7 +420,7 @@
     return api('/api/spots').then(function (data) {
       spots = data;
       render();
-      if (first) fitAll();
+      if (first && !me) fitAll(); // ha már megvan a helyzetem, ott maradunk
     }).catch(function () {
       if (first) toast('Nem sikerült betölteni a helyeket');
     });
@@ -447,19 +447,83 @@
   }
 
   /* -------------------------- saját helyzet -------------------------- */
-  function locate(cb) {
-    if (!navigator.geolocation) { toast('A böngésző nem támogatja a helymeghatározást'); return; }
-    navigator.geolocation.getCurrentPosition(function (pos) {
-      me = L.latLng(pos.coords.latitude, pos.coords.longitude);
-      if (meMarker) meMarker.setLatLng(me);
-      else meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false, keyboard: false }).addTo(map);
-      map.setView(me, Math.max(map.getZoom(), 16), { animate: true });
-      renderList();
-      if (cb) cb();
-    }, function (err) {
-      toast(err.code === 1 ? 'Engedélyezd a helymeghatározást a böngészőben' : 'Nem sikerült meghatározni a helyzeted');
-    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+  var watchId = null;
+  var accCircle = null;
+  var firstFix = true;       // az első pozíciónál ráközelítünk
+  var followMe = false;      // a gomb megnyomása után a térkép követi a helyzetet
+  var lastListRender = 0;
+
+  function onPosition(pos) {
+    me = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    var acc = pos.coords.accuracy || 0;
+
+    if (meMarker) meMarker.setLatLng(me);
+    else meMarker = L.marker(me, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
+
+    // pontossági kör
+    if (acc > 0 && acc < 500) {
+      if (accCircle) { accCircle.setLatLng(me); accCircle.setRadius(acc); }
+      else accCircle = L.circle(me, { radius: acc, color: '#3ea6ff', weight: 1, fillColor: '#3ea6ff', fillOpacity: .12, interactive: false }).addTo(map);
+    } else if (accCircle) { accCircle.remove(); accCircle = null; }
+
+    if (firstFix) {
+      firstFix = false;
+      // csak akkor ugrunk a helyzetre, ha nem éppen hely felvételén dolgozik
+      if (!document.body.classList.contains('adding')) map.setView(me, Math.max(map.getZoom(), 16), { animate: true });
+    } else if (followMe && !document.body.classList.contains('adding')) {
+      map.panTo(me, { animate: true });
+    }
+
+    // a lista távolságait max. 3 mp-enként frissítjük
+    var now = Date.now();
+    if (now - lastListRender > 3000) { lastListRender = now; renderList(); }
   }
+
+  function onPositionError(err) {
+    if (err.code === 1) {
+      toast('Engedélyezd a helymeghatározást a böngészőben');
+      stopWatch(); // elutasított engedélynél nincs értelme újrapróbálni
+    } else if (!me) {
+      toast('Nem sikerült meghatározni a helyzeted');
+    }
+  }
+
+  function startWatch() {
+    if (watchId !== null) return;
+    if (!navigator.geolocation) { toast('A böngésző nem támogatja a helymeghatározást'); return; }
+    watchId = navigator.geolocation.watchPosition(onPosition, onPositionError,
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 2000 });
+  }
+
+  function stopWatch() {
+    if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  }
+
+  // Gomb: ráugrik a jelenlegi helyzetre, és onnantól követi
+  function locate(cb) {
+    followMe = true;
+    if (watchId === null) { firstFix = true; startWatch(); }
+    if (me) {
+      map.setView(me, Math.max(map.getZoom(), 16), { animate: true });
+      if (cb) cb();
+    } else if (cb) {
+      // megvárjuk az első pozíciót
+      var t = setInterval(function () { if (me) { clearInterval(t); cb(); } }, 300);
+      setTimeout(function () { clearInterval(t); }, 15000);
+    }
+  }
+
+  // Ha a felhasználó kézzel húzza a térképet, nem rántjuk vissza magunkra
+  map.on('dragstart', function () { followMe = false; });
+
+  // Háttérbe kerülő lapnál leállítjuk (akku), visszatéréskor újraindítjuk
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stopWatch();
+    else startWatch();
+  });
+
+  // Induláskor automatikusan elkezdjük követni a helyzetet
+  startWatch();
 
   /* ------------------------ új hely felvétele ------------------------ */
   var coordsInput = $('#coords');
